@@ -1,0 +1,24 @@
+
+
+resource "aws_subnet" "public_temporal" {
+  vpc_id            = var.vpc_id
+  cidr_block        = var.subnet
+
+
+  tags = {
+    "Name"                            = "temporal-public"
+    "kubernetes.io/role/internal-elb" = "1"
+    "kubernetes.io/cluster/demo"      = "owned"
+
+  }
+}
+
+
+
+output "subnet_id" {
+  value = aws_subnet.public_temporal.id
+}
+
+output "subnet_arn" {
+  value = aws_subnet.public_temporal.arn
+}

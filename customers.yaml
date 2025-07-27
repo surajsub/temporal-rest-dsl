@@ -1,0 +1,6 @@
+customers:
+  - name: "spark"
+    task_queue: "customer-task-queue-spark"
+  - name: "wahoo"
+    task_queue: "customer-task-queue-wahoo"
+
