@@ -1,0 +1,159 @@
+workflow_name: "aws_infra_provisioning"
+account: "spark"
+submitter: "john.smith@smith.com"
+project: "pegasus"
+action: "create"
+deployment_id: "jul23-02"
+steps:
+  - id: "create_vpc"
+    executor: "terraform"
+    provider: "AWS"
+    resource: "vpc"
+    workspace: "./resources/aws/terraform/vpc"
+    variables:
+      cidr_block: "10.20.20.0/26"
+      vpc_name: "temporal-vpc"
+      region: "us-east-1"
+
+  - id: "create_subnet"
+    executor: "terraform"
+    depends_on: ["create_vpc"]
+    provider: "AWS"
+    resource: "subnet"
+    workspace: "./resources/aws/terraform/subnet"
+    variables:
+      vpc_id: "${create_vpc.vpc_id}"
+      subnet_cidr_public: ["10.20.20.0/28", "10.20.20.16/28", "10.20.20.32/28"]
+      availability_zone: ["us-east-1a", "us-east-1b", "us-east-1c"]
+
+  - id: "create_igw"
+    executor: "terraform"
+    depends_on: ["create_vpc", "create_subnet"]
+    provider: "AWS"
+    resource: "igw"
+    workspace: "./resources/aws/terraform/igw"
+    variables:
+      vpc_id: "${create_vpc.vpc_id}"
+      igw_name: "temporal-igw"
+
+  - id: "create_rt"
+    executor: "terraform"
+    depends_on: ["create_vpc", "create_subnet"]
+    provider: "AWS"
+    resource: "rt"
+    workspace: "./resources/aws/terraform/rt"
+    variables:
+      rt_count: 3
+      vpc_id: "${create_vpc.vpc_id}"
+      igw_id: "${create_igw.igw_id}"
+      subnet_cidr_public_ids: "${create_subnet.aws_subnet_public_ids}"
+
+  - id: "create_sg"
+    executor: "terraform"
+    depends_on: ["create_vpc", "create_subnet"]
+    provider: "AWS"
+    resource: "sg"
+    workspace: "./resources/aws/terraform/sg"
+    variables:
+      vpc_id: "${create_vpc.vpc_id}"
+
+  - id: "get_cost_estimate"
+    executor: "infracost"
+    provisioner: "terraform"
+    operation: "cost_estimate"
+    workspace: "./resources/aws/terraform/ec2"
+    variables:
+      ec2_count: 3
+      subnet_id: "${create_subnet.aws_subnet_public_ids}"
+      sg_id: "${create_sg.sg_id}"
+      key_name: "my-key"
+      instance_type: "t2.micro"
+      ami: "ami-0c7af5fe939f2677f"
+
+  - id: "create_github_issue"
+    executor: "git"
+    operation: "create_issue"
+    variables:
+      repo_owner: "repo-owner-name"
+      repo_name: "repo-to-use"
+      title: "Provision Resource for Project Pegasus"
+      body: "Monthly Cost for Resources for EC2 is  ${get_cost_estimate.estimated_cost}"
+      token: "<token>"
+
+  - id: "poll_github_issue_status"
+    executor: "git"
+    depends_on: ["create_github_issue"]
+    operation: "poll_issue_status"
+    variables:
+      repo_owner: "repo-owner-name"
+      repo_name: "repo-to-use"
+      issue_id: "${create_github_issue.issue_id}" # Reference the output of the previous step
+      token: "<token>"
+
+  - id: "create_ec2"
+    executor: "terraform"
+    depends_on:
+      [
+        "create_vpc",
+        "create_subnet",
+        "create_sg",
+        "create_rt",
+        "get_cost_estimate",
+      ]
+    provider: "AWS"
+    resource: "ec2"
+    operation: "deploy"
+    workspace: "./resources/aws/terraform/ec2"
+    variables:
+      ec2_count: 3
+      subnet_id: "${create_subnet.aws_subnet_public_ids}"
+      sg_id: "${create_sg.sg_id}"
+      key_name: "my-key"
+      instance_type: "t2.micro"
+      ami: "ami-0c7af5fe939f2677f"
+
+  - id: "get_cost_estimate"
+    executor: "infracost"
+    provisioner: "terraform"
+    operation: "cost_estimate"
+    workspace: "./resources/aws/terraform/lb"
+    variables:
+      ec2_count: 3
+      subnet_id: "${create_subnet.aws_subnet_public_ids}"
+      sg_id: "${create_sg.sg_id}"
+      vpc_id: "${create_vpc.vpc_id}"
+      instance_id: "${create_ec2.instance_id}"
+
+  - id: "create_github_issue"
+    executor: "git"
+    operation: "create_issue"
+    variables:
+      repo_owner: "repo-owner"
+      repo_name: "repo-to-use"
+      title: "Provision LB Resources "
+      body: "Cost Estimate for Create a LB ${get_cost_estimate.estimated_cost}"
+      token: "<token>"
+
+  - id: "poll_github_issue_status"
+    executor: "git"
+    depends_on: ["create_github_issue"]
+    operation: "poll_issue_status"
+    variables:
+      repo_owner: "repo-owner"
+      repo_name: "repo-to-use"
+      issue_id: "${create_github_issue.issue_id}"
+      token: "<token>"
+
+  - id: "create_lb"
+    executor: "terraform"
+    depends_on: ["create_vpc", "create_subnet", "create_sg", "create_rt"]
+    provider: "AWS"
+    resource: "lb"
+    operation: "deploy"
+    workspace: "./resources/aws/terraform/lb"
+    variables:
+      ec2_count: 3
+      subnet_id: "${create_subnet.aws_subnet_public_ids}"
+      sg_id: "${create_sg.sg_id}"
+      vpc_id: "${create_vpc.vpc_id}"
+      instance_id: "${create_ec2.instance_id}"
